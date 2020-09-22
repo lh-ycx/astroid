@@ -726,6 +726,8 @@ def _infer_binary_operation(left, right, binary_opnode, context, flow_factory):
         except AttributeError:
             continue
         except exceptions.AttributeInferenceError:
+            import traceback
+            traceback.print_exc()
             continue
         except exceptions.InferenceError:
             yield util.Uninferable
