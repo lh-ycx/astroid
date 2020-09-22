@@ -1,7 +1,7 @@
 import astroid
 from astroid import *
 
-input_file = "empty_udf.py"
+input_file = "tests/test_proxy.py"
 
 df2col2taint = {
     "df": {"tainted_col": True, "untainted_col": False}
