@@ -222,6 +222,7 @@ def infer_call(self, context=None):
     )
     callcontext.boundnode = None
     if context is not None:
+        # extra context saved the args, what's for?
         callcontext.extra_context = _populate_context_lookup(self, context.clone())
 
     for callee in self.func.infer(context):
@@ -389,6 +390,7 @@ def infer_subscript(self, context=None):
 
             try:
                 assigned = value.getitem(index_value, context)
+                # print(assigned)
             except (
                 exceptions.AstroidTypeError,
                 exceptions.AstroidIndexError,

@@ -316,10 +316,15 @@ class NodeNG:
 
     :type: tuple(str)
     """
+    _taint_fields = ("taint_tag", )
+    """ Attributes that contain taint tag fields.
+    
+    :type: tuple(str)
+    """
     # instance specific inference function infer(node, context)
     _explicit_inference = None
 
-    def __init__(self, lineno=None, col_offset=None, parent=None):
+    def __init__(self, lineno=None, col_offset=None, parent=None, taint_tag=None):
         """
         :param lineno: The line that this node appears on in the source code.
         :type lineno: int or None
@@ -330,10 +335,14 @@ class NodeNG:
 
         :param parent: The parent node in the syntax tree.
         :type parent: NodeNG or None
+
+        :para taint_tag: Tag_of this node (a temporary implementation).
+        :Type: Boolean or None
         """
         self.lineno = lineno
         self.col_offset = col_offset
         self.parent = parent
+        self.taint_tag = taint_tag
 
     def infer(self, context=None, **kwargs):
         """Get a generator of the inferred values.
@@ -348,6 +357,9 @@ class NodeNG:
         :returns: The inferred values.
         :rtype: iterable
         """
+        from astroid.taint_node import TaintNode
+        if isinstance(self, TaintNode):
+            yield self
         if context is not None:
             context = context.extra_context.get(self, context)
         if self._explicit_inference is not None:
@@ -409,7 +421,7 @@ class NodeNG:
             string = "%(cname)s(%(fields)s)"
             alignment = len(cname) + 1
         result = []
-        for field in self._other_fields + self._astroid_fields:
+        for field in self._other_fields + self._astroid_fields + self._taint_fields:
             value = getattr(self, field)
             width = 80 - len(field) - alignment
             lines = pprint.pformat(value, indent=2, width=width).splitlines(True)

@@ -174,3 +174,5 @@ ALL_NODE_CLASSES = (
     FormattedValue,
     JoinedStr,
 )
+
+from astroid.taint_node import TaintNode

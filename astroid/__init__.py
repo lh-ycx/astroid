@@ -75,6 +75,9 @@ from astroid.scoped_nodes import builtin_lookup
 from astroid.builder import parse, extract_node
 from astroid.util import Uninferable
 
+# taint node
+from astroid import taint_node
+
 # make a manager instance (borg) accessible from astroid package
 from astroid.manager import AstroidManager
 
