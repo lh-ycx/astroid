@@ -1,7 +1,7 @@
 import astroid
 from astroid import *
 
-input_file = "tests/test_proxy.py"
+input_file = "tests/test_taint_node.py"
 
 df2col2taint = {
     "df": {"tainted_col": True, "untainted_col": False}
@@ -10,9 +10,18 @@ df2col2taint = {
 udf_names = ['simple_udf']
 
 
-def build_from_dict(col2taint):
-    ret_node = nodes.Dict()
-    ret_node.items = [[nodes.Const(value=key), nodes.TaintNode(taint_tag=col2taint[key])] for key in col2taint]
+def build_from_dict(old_node, col2taint):
+    ret_node = nodes.Dict(lineno=old_node.lineno, col_offset=old_node.col_offset, parent=old_node.parent)
+    items = []
+    for key in col2taint:
+        node = nodes.Call(lineno=ret_node.lineno, parent=ret_node)
+        node.postinit(
+            func=Name(name='TaintInstance', parent=node),
+            args=[Const(value=col2taint[key], parent=node)],
+            keywords=None
+        )
+        items.append([nodes.Const(parent=ret_node, value=key), node])
+    ret_node.postinit(items=items)
     return ret_node
 
 
@@ -20,7 +29,8 @@ def infer_my_custom_arg(node, context=None):
     # instrument the argument according to col2taint
     df_name = node.name
     col2taint = df2col2taint[df_name]
-    new_node = build_from_dict(col2taint)
+    new_node = build_from_dict(node, col2taint)
+    new_node.parent = node.parent
     print(new_node.repr_tree())
     return iter((new_node, ))
 
@@ -47,7 +57,12 @@ def main():
     tree = astroid.extract_node(code)
     # tree.args[0].taint_tag = True
     print(tree.repr_tree())
-    print(tree.inferred()[0])
+    # res = tree.inferred()
+    res = tree.query()
+    print(res) # Instance of debug.tests.extra.taint_instance.TaintInstance
+
+    # try to get value from the instance
+    # print(res.bool_value())
 
 
 if __name__ == "__main__":

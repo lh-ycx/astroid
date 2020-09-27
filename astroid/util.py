@@ -57,6 +57,38 @@ class Uninferable:
         return func(self)
 
 
+
+@object.__new__
+class Unqueryable:
+    """Special inference object, which is returned when inference fails."""
+
+    def __repr__(self):
+        return "Unqueryable"
+
+    __str__ = __repr__
+
+    def __getattribute__(self, name):
+        if name == "next":
+            raise AttributeError("next method should not be called")
+        if name.startswith("__") and name.endswith("__"):
+            return object.__getattribute__(self, name)
+        if name == "accept":
+            return object.__getattribute__(self, name)
+        return self
+
+    def __call__(self, *args, **kwargs):
+        return self
+
+    def __bool__(self):
+        return False
+
+    __nonzero__ = __bool__
+
+    def accept(self, visitor):
+        func = getattr(visitor, "visit_unqueryable")
+        return func(self)
+
+
 class BadOperationMessage:
     """Object which describes a TypeError occurred somewhere in the inference chain
 

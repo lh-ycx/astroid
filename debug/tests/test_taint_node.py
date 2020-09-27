@@ -1,29 +1,15 @@
 from pyspark.sql.functions import udf
-from pyspark.sql import SparkSession, DataFrame
+from pyspark.sql.types import *
+from debug.tests.extra.taint_instance import TaintInstance
 
-'''
-from scipy import spatial
+import base64
 
-@udf
-def distractor_beats_target(vectors):
-    target, distractor, email = vectors
+def decode_base64(row):
+    return_val = "####"
+    base64_string = ''.join(chr(x) for x in bytearray(row))
+    return_val = base64.b64decode(base64_string).decode('utf-8')
+    return return_val
 
-    cos_target = spatial.distance.cosine(np.array(target), np.array(email))
-    cos_distractor = spatial.distance.cosine(np.array(distractor), np.array(email))
-    return cos_target > cos_distractor
-'''
+decode_udf = udf(__(lambda z: decode_base64(z)), StringType())
 
-some_path = 'aaa'
-
-@udf
-def simple_udf(df):
-    return df["tainted_col"]
-    # a = df["tainted_col"]
-    # b = df["untainted_col"]
-    # return a
-
-spark = SparkSession.builder.appName(appName).getOrCreate()
-df = spark.read.json(some_path)
-
-
-simple_udf(df)
+docs_text = docs.withColumn("DecodedText", decode_udf(docs['FileContent']))

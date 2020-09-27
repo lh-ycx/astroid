@@ -1,27 +1,6 @@
 # -*- coding: utf-8 -*-
-# Copyright (c) 2006-2011, 2013-2014 LOGILAB S.A. (Paris, FRANCE) <contact@logilab.fr>
-# Copyright (c) 2012 FELD Boris <lothiraldan@gmail.com>
-# Copyright (c) 2013-2014 Google, Inc.
-# Copyright (c) 2014-2020 Claudiu Popa <pcmanticore@gmail.com>
-# Copyright (c) 2014 Eevee (Alex Munroe) <amunroe@yelp.com>
-# Copyright (c) 2015-2016 Ceridwen <ceridwenv@gmail.com>
-# Copyright (c) 2015 Dmitry Pribysh <dmand@yandex.ru>
-# Copyright (c) 2016 Jakub Wilk <jwilk@jwilk.net>
-# Copyright (c) 2017 Michał Masłowski <m.maslowski@clearcode.cc>
-# Copyright (c) 2017 Calen Pennington <cale@edx.org>
-# Copyright (c) 2017 Łukasz Rogalski <rogalski.91@gmail.com>
-# Copyright (c) 2018-2019 Nick Drozd <nicholasdrozd@gmail.com>
-# Copyright (c) 2018 Daniel Martin <daniel.martin@crowdstrike.com>
-# Copyright (c) 2018 Ville Skyttä <ville.skytta@iki.fi>
-# Copyright (c) 2018 Bryce Guinta <bryce.paul.guinta@gmail.com>
-# Copyright (c) 2018 Ashley Whetter <ashley@awhetter.co.uk>
-# Copyright (c) 2018 HoverHell <hoverhell@gmail.com>
-# Copyright (c) 2020 Leandro T. C. Melo <ltcmelo@gmail.com>
 
-# Licensed under the LGPL: https://www.gnu.org/licenses/old-licenses/lgpl-2.1.en.html
-# For details: https://github.com/PyCQA/astroid/blob/master/COPYING.LESSER
-
-"""this module contains a set of functions to handle inference on astroid trees
+"""this module contains a set of functions to handle query on astroid trees
 """
 
 import functools
@@ -46,44 +25,44 @@ MANAGER = manager.AstroidManager()
 objects = util.lazy_import("objects")
 
 
-# .infer method ###############################################################
+# .query method ###############################################################
 
 
-def infer_end(self, context=None):
-    """Inference's end for nodes that yield themselves on inference
+def query_end(self, context=None):
+    """Inference's end for nodes that yield themselves on Inference
 
-    These are objects for which inference does not have any semantic,
+    These are objects for which Inference does not have any semantic,
     such as Module or Consts.
     """
     yield self
 
-@decorators.raise_if_nothing_inferred
-@decorators.path_wrapper
-def infer_lambda(self, context=None):
-    for res in self.body.infer(context):
-        yield res
-
-nodes.Module._infer = infer_end
-nodes.ClassDef._infer = infer_end
-nodes.Lambda._infer = infer_lambda
-nodes.Const._infer = infer_end
-nodes.Slice._infer = infer_end
+# @decorators.raise_if_nothing_queried
+# @decorators.path_wrapper
+def query_lambda(self, context=None):
+    return self.body.query(context)
 
 
-def _infer_sequence_helper(node, context=None):
-    """Infer all values based on _BaseContainer.elts"""
+nodes.Module._query = query_end
+nodes.ClassDef._query = query_end
+nodes.Lambda._query = query_lambda
+nodes.Const._query = query_end
+nodes.Slice._query = query_end
+
+
+def _query_sequence_helper(node, context=None):
+    """query all values based on _BaseContainer.elts"""
     values = []
 
     for elt in node.elts:
         if isinstance(elt, nodes.Starred):
-            starred = helpers.safe_infer(elt.value, context)
+            starred = helpers.safe_query(elt.value, context)
             if not starred:
                 raise exceptions.InferenceError(node=node, context=context)
             if not hasattr(starred, "elts"):
                 raise exceptions.InferenceError(node=node, context=context)
-            values.extend(_infer_sequence_helper(starred))
+            values.extend(_query_sequence_helper(starred))
         elif isinstance(elt, nodes.NamedExpr):
-            value = helpers.safe_infer(elt.value, context)
+            value = helpers.safe_query(elt.value, context)
             if not value:
                 raise exceptions.InferenceError(node=node, context=context)
             values.append(value)
@@ -92,13 +71,13 @@ def _infer_sequence_helper(node, context=None):
     return values
 
 
-@decorators.raise_if_nothing_inferred
-def infer_sequence(self, context=None):
+@decorators.raise_if_nothing_queried
+def query_sequence(self, context=None):
     has_starred_named_expr = any(
         isinstance(e, (nodes.Starred, nodes.NamedExpr)) for e in self.elts
     )
     if has_starred_named_expr:
-        values = _infer_sequence_helper(self, context)
+        values = _query_sequence_helper(self, context)
         new_seq = type(self)(
             lineno=self.lineno, col_offset=self.col_offset, parent=self.parent
         )
@@ -109,16 +88,16 @@ def infer_sequence(self, context=None):
         yield self
 
 
-nodes.List._infer = infer_sequence
-nodes.Tuple._infer = infer_sequence
-nodes.Set._infer = infer_sequence
+nodes.List._query = query_sequence
+nodes.Tuple._query = query_sequence
+nodes.Set._query = query_sequence
 
 
-def infer_map(self, context=None):
+def query_map(self, context=None):
     if not any(isinstance(k, nodes.DictUnpack) for k, _ in self.items):
         yield self
     else:
-        items = _infer_map(self, context)
+        items = _query_map(self, context)
         new_seq = type(self)(self.lineno, self.col_offset, self.parent)
         new_seq.postinit(list(items.items()))
         yield new_seq
@@ -134,7 +113,7 @@ def _update_with_replacement(lhs_dict, rhs_dict):
     Note that both the key and the value are astroid nodes
 
     Fixes issue with DictUnpack causing duplicte keys
-    in inferred Dict items
+    in queried Dict items
 
     :param dict(nodes.NodeNG, nodes.NodeNG) lhs_dict: Dictionary to 'merge' nodes into
     :param dict(nodes.NodeNG, nodes.NodeNG) rhs_dict: Dictionary with nodes to pull from
@@ -147,28 +126,28 @@ def _update_with_replacement(lhs_dict, rhs_dict):
     return dict(string_map.values())
 
 
-def _infer_map(node, context):
-    """Infer all values based on Dict.items"""
+def _query_map(node, context):
+    """query all values based on Dict.items"""
     values = {}
     for name, value in node.items:
         if isinstance(name, nodes.DictUnpack):
-            double_starred = helpers.safe_infer(value, context)
+            double_starred = helpers.safe_query(value, context)
             if not double_starred:
                 raise exceptions.InferenceError
             if not isinstance(double_starred, nodes.Dict):
                 raise exceptions.InferenceError(node=node, context=context)
-            unpack_items = _infer_map(double_starred, context)
+            unpack_items = _query_map(double_starred, context)
             values = _update_with_replacement(values, unpack_items)
         else:
-            key = helpers.safe_infer(name, context=context)
-            value = helpers.safe_infer(value, context=context)
+            key = helpers.safe_query(name, context=context)
+            value = helpers.safe_query(value, context=context)
             if any(not elem for elem in (key, value)):
                 raise exceptions.InferenceError(node=node, context=context)
             values = _update_with_replacement(values, {key: value})
     return values
 
 
-nodes.Dict._infer = infer_map
+nodes.Dict._query = query_map
 
 
 def _higher_function_scope(node):
@@ -191,8 +170,8 @@ def _higher_function_scope(node):
     return None
 
 
-def infer_name(self, context=None):
-    """infer a Name: use name lookup rules"""
+def query_name(self, context=None):
+    """query a Name: use name lookup rules"""
     frame, stmts = self.lookup(self.name)
     if not stmts:
         # Try to see if the name is enclosed in a nested function
@@ -207,20 +186,20 @@ def infer_name(self, context=None):
             )
     context = contextmod.copy_context(context)
     context.lookupname = self.name
-    return bases._infer_stmts(stmts, context, frame)
+    return bases._query_stmts(stmts, context, frame)
 
 
 # pylint: disable=no-value-for-parameter
-nodes.Name._infer = decorators.raise_if_nothing_inferred(
-    decorators.path_wrapper(infer_name)
+nodes.Name._query = decorators.raise_if_nothing_queried(
+    decorators.path_wrapper(query_name)
 )
-nodes.AssignName.infer_lhs = infer_name  # won't work with a path wrapper
+nodes.AssignName.query_lhs = query_name  # won't work with a path wrapper
 
 
-@decorators.raise_if_nothing_inferred
+@decorators.raise_if_nothing_queried
 @decorators.path_wrapper
-def infer_call(self, context=None):
-    """infer a Call node by trying to guess what the function returns"""
+def query_call(self: nodes.Call, context=None):
+    """query a Call node by trying to guess what the function returns"""
     callcontext = contextmod.copy_context(context)
     callcontext.callcontext = contextmod.CallContext(
         args=self.args, keywords=self.keywords
@@ -230,75 +209,60 @@ def infer_call(self, context=None):
         # extra context saved the args, what's for?
         callcontext.extra_context = _populate_context_lookup(self, context.clone())
 
-    for callee in self.func.infer(context):
+    for callee in self.func.query(context):
         if callee is util.Uninferable:
             yield callee
             continue
+        if callee is util.Unqueryable:
+            if not isinstance(self.keywords, None):
+                # not implemented
+                print(kv)
+                assert False
+            return self.args
+
         try:
-            if hasattr(callee, "infer_call_result"):
+            if hasattr(callee, "query_call_result"):
                 # no filed sensitive here
-                yield from callee.infer_call_result(caller=self, context=callcontext)
+                yield from callee.query_call_result(caller=self, context=callcontext)
         except exceptions.InferenceError:
             continue
     return dict(node=self, context=context)
 
 
-nodes.Call._infer = infer_call
+nodes.Call._query = query_call
 
 
-@decorators.raise_if_nothing_inferred
+@decorators.raise_if_nothing_queried
 @decorators.path_wrapper
-def infer_import(self, context=None, asname=True):
-    """infer an Import node: return the imported module/object"""
-    name = context.lookupname
-    if name is None:
-        raise exceptions.InferenceError(node=self, context=context)
-
-    try:
-        if asname:
-            yield self.do_import_module(self.real_name(name))
-        else:
-            yield self.do_import_module(name)
-    except exceptions.AstroidBuildingError as exc:
-        raise exceptions.InferenceError(node=self, context=context) from exc
+def query_import(self, context=None, asname=True):
+    """query an Import node: return the imported module/object"""
+    # do conservative query for all import statements
+    yield util.Unqueryable
 
 
-nodes.Import._infer = infer_import
+nodes.Import._query = query_import
 
 
-@decorators.raise_if_nothing_inferred
+@decorators.raise_if_nothing_queried
 @decorators.path_wrapper
-def infer_import_from(self, context=None, asname=True):
-    """infer a ImportFrom node: return the imported module/object"""
-    name = context.lookupname
-    if name is None:
-        raise exceptions.InferenceError(node=self, context=context)
-    if asname:
-        name = self.real_name(name)
-
-    try:
-        module = self.do_import_module()
-    except exceptions.AstroidBuildingError as exc:
-        raise exceptions.InferenceError(node=self, context=context) from exc
-
-    try:
-        context = contextmod.copy_context(context)
-        context.lookupname = name
-        stmts = module.getattr(name, ignore_locals=module is self.root())
-        return bases._infer_stmts(stmts, context)
-    except exceptions.AttributeInferenceError as error:
-        raise exceptions.InferenceError(
-            error.message, target=self, attribute=name, context=context
-        ) from error
+def query_import_from(self, context=None, asname=True):
+    """query a ImportFrom node: return the imported module/object"""
+    # do conservative query for all import statements
+    yield util.Unqueryable
 
 
-nodes.ImportFrom._infer = infer_import_from
+
+nodes.ImportFrom._query = query_import_from
 
 
-def infer_attribute(self, context=None):
-    """infer an Attribute node by using getattr on the associated object"""
-    for owner in self.expr.infer(context):
+def query_attribute(self, context=None):
+    """query an Attribute node by using getattr on the associated object"""
+    for owner in self.expr.query(context):
         if owner is util.Uninferable:
+            yield owner
+            continue
+
+        if owner is util.Unqueryable:
             yield owner
             continue
 
@@ -335,47 +299,47 @@ def infer_attribute(self, context=None):
     return dict(node=self, context=context)
 
 
-nodes.Attribute._infer = decorators.raise_if_nothing_inferred(
-    decorators.path_wrapper(infer_attribute)
+nodes.Attribute._query = decorators.raise_if_nothing_queried(
+    decorators.path_wrapper(query_attribute)
 )
 # won't work with a path wrapper
-nodes.AssignAttr.infer_lhs = decorators.raise_if_nothing_inferred(infer_attribute)
+nodes.AssignAttr.query_lhs = decorators.raise_if_nothing_queried(query_attribute)
 
 
-@decorators.raise_if_nothing_inferred
+@decorators.raise_if_nothing_queried
 @decorators.path_wrapper
-def infer_global(self, context=None):
+def query_global(self, context=None):
     if context.lookupname is None:
         raise exceptions.InferenceError(node=self, context=context)
     try:
-        return bases._infer_stmts(self.root().getattr(context.lookupname), context)
+        return bases._query_stmts(self.root().getattr(context.lookupname), context)
     except exceptions.AttributeInferenceError as error:
         raise exceptions.InferenceError(
             error.message, target=self, attribute=context.lookupname, context=context
         ) from error
 
 
-nodes.Global._infer = infer_global
+nodes.Global._query = query_global
 
 
 _SUBSCRIPT_SENTINEL = object()
 
 
-def infer_subscript(self: nodes.Subscript, context=None):
+def query_subscript(self: nodes.Subscript, context=None):
     """Inference for subscripts
 
     We're understanding if the index is a Const
-    or a slice, passing the result of inference
+    or a slice, passing the result of Inference
     to the value's `getitem` method, which should
     handle each supported index type accordingly.
     """
 
     found_one = False
-    for value in self.value.infer(context):
+    for value in self.value.query(context):
         if value is util.Uninferable:
             yield util.Uninferable
             return None
-        for index in self.slice.infer(context):
+        for index in self.slice.query(context):
             if index is util.Uninferable:
                 yield util.Uninferable
                 return None
@@ -405,12 +369,12 @@ def infer_subscript(self: nodes.Subscript, context=None):
             ) as exc:
                 raise exceptions.InferenceError(node=self, context=context) from exc
 
-            # Prevent inferring if the inferred subscript
+            # Prevent queriing if the queried subscript
             # is the same as the original subscripted object.
             if self is assigned or assigned is util.Uninferable:
                 yield util.Uninferable
                 return None
-            yield from assigned.infer(context)
+            yield from assigned.query(context)
             found_one = True
 
     if found_one:
@@ -418,19 +382,19 @@ def infer_subscript(self: nodes.Subscript, context=None):
     return None
 
 
-nodes.Subscript._infer = decorators.raise_if_nothing_inferred(
-    decorators.path_wrapper(infer_subscript)
+nodes.Subscript._query = decorators.raise_if_nothing_queried(
+    decorators.path_wrapper(query_subscript)
 )
-nodes.Subscript.infer_lhs = decorators.raise_if_nothing_inferred(infer_subscript)
+nodes.Subscript.query_lhs = decorators.raise_if_nothing_queried(query_subscript)
 
 
-@decorators.raise_if_nothing_inferred
+@decorators.raise_if_nothing_queried
 @decorators.path_wrapper
-def _infer_boolop(self, context=None):
-    """Infer a boolean operation (and / or / not).
+def _query_boolop(self, context=None):
+    """query a boolean operation (and / or / not).
 
     The function will calculate the boolean operation
-    for all pairs generated through inference for each component
+    for all pairs generated through Inference for each component
     node.
     """
     values = self.values
@@ -440,20 +404,20 @@ def _infer_boolop(self, context=None):
         predicate = operator.not_
 
     try:
-        values = [value.infer(context=context) for value in values]
+        values = [value.query(context=context) for value in values]
     except exceptions.InferenceError:
         yield util.Uninferable
         return None
 
     for pair in itertools.product(*values):
         if any(item is util.Uninferable for item in pair):
-            # Can't infer the final result, just yield Uninferable.
+            # Can't query the final result, just yield Uninferable.
             yield util.Uninferable
             continue
 
         bool_values = [item.bool_value() for item in pair]
         if any(item is util.Uninferable for item in bool_values):
-            # Can't infer the final result, just yield Uninferable.
+            # Can't query the final result, just yield Uninferable.
             yield util.Uninferable
             continue
 
@@ -477,28 +441,28 @@ def _infer_boolop(self, context=None):
     return dict(node=self, context=context)
 
 
-nodes.BoolOp._infer = _infer_boolop
+nodes.BoolOp._query = _query_boolop
 
 
-# UnaryOp, BinOp and AugAssign inferences
+# UnaryOp, BinOp and AugAssign Inferences
 
 
-def _filter_operation_errors(self, infer_callable, context, error):
-    for result in infer_callable(self, context):
+def _filter_operation_errors(self, query_callable, context, error):
+    for result in query_callable(self, context):
         if isinstance(result, error):
-            # For the sake of .infer(), we don't care about operation
+            # For the sake of .query(), we don't care about operation
             # errors, which is the job of pylint. So return something
-            # which shows that we can't infer the result.
+            # which shows that we can't query the result.
             yield util.Uninferable
         else:
             yield result
 
 
-def _infer_unaryop(self, context=None):
-    """Infer what an UnaryOp should return when evaluated."""
-    for operand in self.operand.infer(context):
+def _query_unaryop(self, context=None):
+    """query what an UnaryOp should return when evaluated."""
+    for operand in self.operand.query(context):
         try:
-            yield operand.infer_unary_op(self.op)
+            yield operand.query_unary_op(self.op)
         except TypeError as exc:
             # The operand doesn't support this operation.
             yield util.BadUnaryOperationMessage(operand, self.op, exc)
@@ -528,16 +492,16 @@ def _infer_unaryop(self, context=None):
                         continue
 
                     meth = methods[0]
-                    inferred = next(meth.infer(context=context))
-                    if inferred is util.Uninferable or not inferred.callable():
+                    queried = next(meth.query(context=context))
+                    if queried is util.Uninferable or not queried.callable():
                         continue
 
                     context = contextmod.copy_context(context)
                     context.callcontext = contextmod.CallContext(args=[operand])
-                    call_results = inferred.infer_call_result(self, context=context)
+                    call_results = queried.query_call_result(self, context=context)
                     result = next(call_results, None)
                     if result is None:
-                        # Failed to infer, return the same type.
+                        # Failed to query, return the same type.
                         yield operand
                     else:
                         yield result
@@ -548,18 +512,18 @@ def _infer_unaryop(self, context=None):
                     yield util.Uninferable
 
 
-@decorators.raise_if_nothing_inferred
+@decorators.raise_if_nothing_queried
 @decorators.path_wrapper
-def infer_unaryop(self, context=None):
-    """Infer what an UnaryOp should return when evaluated."""
+def query_unaryop(self, context=None):
+    """query what an UnaryOp should return when evaluated."""
     yield from _filter_operation_errors(
-        self, _infer_unaryop, context, util.BadUnaryOperationMessage
+        self, _query_unaryop, context, util.BadUnaryOperationMessage
     )
     return dict(node=self, context=context)
 
 
-nodes.UnaryOp._infer_unaryop = _infer_unaryop
-nodes.UnaryOp._infer = infer_unaryop
+nodes.UnaryOp._query_unaryop = _query_unaryop
+nodes.UnaryOp._query = query_unaryop
 
 
 def _is_not_implemented(const):
@@ -567,22 +531,22 @@ def _is_not_implemented(const):
     return isinstance(const, nodes.Const) and const.value is NotImplemented
 
 
-def _invoke_binop_inference(instance, opnode, op, other, context, method_name):
-    """Invoke binary operation inference on the given instance."""
+def _invoke_binop_Inference(instance, opnode, op, other, context, method_name):
+    """Invoke binary operation Inference on the given instance."""
     methods = dunder_lookup.lookup(instance, method_name)
     context = contextmod.bind_context_to_node(context, instance)
     method = methods[0]
-    inferred = next(method.infer(context=context))
-    if inferred is util.Uninferable:
+    queried = next(method.query(context=context))
+    if queried is util.Uninferable:
         raise exceptions.InferenceError
-    return instance.infer_binary_op(opnode, op, other, context, inferred)
+    return instance.query_binary_op(opnode, op, other, context, queried)
 
 
 def _aug_op(instance, opnode, op, other, context, reverse=False):
-    """Get an inference callable for an augmented binary operation."""
+    """Get an Inference callable for an augmented binary operation."""
     method_name = protocols.AUGMENTED_OP_METHOD[op]
     return functools.partial(
-        _invoke_binop_inference,
+        _invoke_binop_Inference,
         instance=instance,
         op=op,
         opnode=opnode,
@@ -593,7 +557,7 @@ def _aug_op(instance, opnode, op, other, context, reverse=False):
 
 
 def _bin_op(instance, opnode, op, other, context, reverse=False):
-    """Get an inference callable for a normal binary operation.
+    """Get an Inference callable for a normal binary operation.
 
     If *reverse* is True, then the reflected method will be used instead.
     """
@@ -602,7 +566,7 @@ def _bin_op(instance, opnode, op, other, context, reverse=False):
     else:
         method_name = protocols.BIN_OP_METHOD[op]
     return functools.partial(
-        _invoke_binop_inference,
+        _invoke_binop_Inference,
         instance=instance,
         op=op,
         opnode=opnode,
@@ -615,7 +579,7 @@ def _bin_op(instance, opnode, op, other, context, reverse=False):
 def _get_binop_contexts(context, left, right):
     """Get contexts for binary operations.
 
-    This will return two inference contexts, the first one
+    This will return two Inference contexts, the first one
     for x.__op__(y), the other one for y.__rop__(x), where
     only the arguments are inversed.
     """
@@ -713,8 +677,8 @@ def _get_aug_flow(
     return methods
 
 
-def _infer_binary_operation(left, right, binary_opnode, context, flow_factory):
-    """Infer a binary operation between a left operand and a right operand
+def _query_binary_operation(left, right, binary_opnode, context, flow_factory):
+    """query a binary operation between a left operand and a right operand
 
     This is used by both normal binary operations and augmented binary
     operations, the only difference is the flow factory used.
@@ -749,7 +713,7 @@ def _infer_binary_operation(left, right, binary_opnode, context, flow_factory):
                 1 for result in results if _is_not_implemented(result)
             )
             if not_implemented and not_implemented != len(results):
-                # Can't infer yet what this is.
+                # Can't query yet what this is.
                 yield util.Uninferable
                 return
 
@@ -759,19 +723,19 @@ def _infer_binary_operation(left, right, binary_opnode, context, flow_factory):
     yield util.BadBinaryOperationMessage(left_type, binary_opnode.op, right_type)
 
 
-def _infer_binop(self, context):
-    """Binary operation inference logic."""
+def _query_binop(self, context):
+    """Binary operation Inference logic."""
     left = self.left
     right = self.right
 
     # we use two separate contexts for evaluating lhs and rhs because
     # 1. evaluating lhs may leave some undesired entries in context.path
-    #    which may not let us infer right value of rhs
+    #    which may not let us query right value of rhs
     context = context or contextmod.InferenceContext()
     lhs_context = contextmod.copy_context(context)
     rhs_context = contextmod.copy_context(context)
-    lhs_iter = left.infer(context=lhs_context)
-    rhs_iter = right.infer(context=rhs_context)
+    lhs_iter = left.query(context=lhs_context)
+    rhs_iter = right.query(context=rhs_context)
     for lhs, rhs in itertools.product(lhs_iter, rhs_iter):
         if any(value is util.Uninferable for value in (rhs, lhs)):
             # Don't know how to process this.
@@ -779,32 +743,32 @@ def _infer_binop(self, context):
             return
 
         try:
-            yield from _infer_binary_operation(lhs, rhs, self, context, _get_binop_flow)
+            yield from _query_binary_operation(lhs, rhs, self, context, _get_binop_flow)
         except exceptions._NonDeducibleTypeHierarchy:
             yield util.Uninferable
 
 
-@decorators.yes_if_nothing_inferred
+@decorators.yes_if_nothing_queried
 @decorators.path_wrapper
-def infer_binop(self, context=None):
+def query_binop(self, context=None):
     return _filter_operation_errors(
-        self, _infer_binop, context, util.BadBinaryOperationMessage
+        self, _query_binop, context, util.BadBinaryOperationMessage
     )
 
 
-nodes.BinOp._infer_binop = _infer_binop
-nodes.BinOp._infer = infer_binop
+nodes.BinOp._query_binop = _query_binop
+nodes.BinOp._query = query_binop
 
 
-def _infer_augassign(self, context=None):
+def _query_augassign(self, context=None):
     """Inference logic for augmented binary operations."""
     if context is None:
         context = contextmod.InferenceContext()
 
     rhs_context = context.clone()
 
-    lhs_iter = self.target.infer_lhs(context=context)
-    rhs_iter = self.value.infer(context=rhs_context)
+    lhs_iter = self.target.query_lhs(context=context)
+    rhs_iter = self.value.query(context=rhs_context)
     for lhs, rhs in itertools.product(lhs_iter, rhs_iter):
         if any(value is util.Uninferable for value in (rhs, lhs)):
             # Don't know how to process this.
@@ -812,7 +776,7 @@ def _infer_augassign(self, context=None):
             return
 
         try:
-            yield from _infer_binary_operation(
+            yield from _query_binary_operation(
                 left=lhs,
                 right=rhs,
                 binary_opnode=self,
@@ -823,69 +787,69 @@ def _infer_augassign(self, context=None):
             yield util.Uninferable
 
 
-@decorators.raise_if_nothing_inferred
+@decorators.raise_if_nothing_queried
 @decorators.path_wrapper
-def infer_augassign(self, context=None):
+def query_augassign(self, context=None):
     return _filter_operation_errors(
-        self, _infer_augassign, context, util.BadBinaryOperationMessage
+        self, _query_augassign, context, util.BadBinaryOperationMessage
     )
 
 
-nodes.AugAssign._infer_augassign = _infer_augassign
-nodes.AugAssign._infer = infer_augassign
+nodes.AugAssign._query_augassign = _query_augassign
+nodes.AugAssign._query = query_augassign
 
-# End of binary operation inference.
+# End of binary operation Inference.
 
 
-@decorators.raise_if_nothing_inferred
-def infer_arguments(self, context=None):
+@decorators.raise_if_nothing_queried
+def query_arguments(self, context=None):
     name = context.lookupname
     if name is None:
         raise exceptions.InferenceError(node=self, context=context)
-    return protocols._arguments_infer_argname(self, name, context)
+    return protocols._arguments_query_argname(self, name, context)
 
 
-nodes.Arguments._infer = infer_arguments
+nodes.Arguments._query = query_arguments
 
 
-@decorators.raise_if_nothing_inferred
+@decorators.raise_if_nothing_queried
 @decorators.path_wrapper
-def infer_assign(self, context=None):
-    """infer a AssignName/AssignAttr: need to inspect the RHS part of the
+def query_assign(self, context=None):
+    """query a AssignName/AssignAttr: need to inspect the RHS part of the
     assign node
     """
     if isinstance(self.parent, nodes.AugAssign):
-        return self.parent.infer(context)
+        return self.parent.query(context)
 
     stmts = list(self.assigned_stmts(context=context))
-    return bases._infer_stmts(stmts, context)
+    return bases._query_stmts(stmts, context)
 
 
-nodes.AssignName._infer = infer_assign
-nodes.AssignAttr._infer = infer_assign
+nodes.AssignName._query = query_assign
+nodes.AssignAttr._query = query_assign
 
 
-@decorators.raise_if_nothing_inferred
+@decorators.raise_if_nothing_queried
 @decorators.path_wrapper
-def infer_empty_node(self, context=None):
+def query_empty_node(self, context=None):
     if not self.has_underlying_object():
         yield util.Uninferable
     else:
         try:
-            yield from MANAGER.infer_ast_from_something(self.object, context=context)
+            yield from MANAGER.query_ast_from_something(self.object, context=context)
         except exceptions.AstroidError:
             yield util.Uninferable
 
 
-nodes.EmptyNode._infer = infer_empty_node
+nodes.EmptyNode._query = query_empty_node
 
 
-@decorators.raise_if_nothing_inferred
-def infer_index(self, context=None):
-    return self.value.infer(context)
+@decorators.raise_if_nothing_queried
+def query_index(self, context=None):
+    return self.value.query(context)
 
 
-nodes.Index._infer = infer_index
+nodes.Index._query = query_index
 
 # TODO: move directly into bases.Instance when the dependency hell
 # will be solved.
@@ -904,7 +868,7 @@ def instance_getitem(self, index, context=None):
             "Could not find __getitem__ for {node!r}.", node=self, context=context
         )
 
-    return next(method.infer_call_result(self, new_context))
+    return next(method.query_call_result(self, new_context))
 
 
 bases.Instance.getitem = instance_getitem
@@ -912,7 +876,7 @@ bases.Instance.getitem = instance_getitem
 
 def _populate_context_lookup(call, context):
     # Allows context to be saved for later
-    # for inference inside a function
+    # for Inference inside a function
     context_lookup = {}
     if context is None:
         return context_lookup
@@ -927,40 +891,40 @@ def _populate_context_lookup(call, context):
     return context_lookup
 
 
-@decorators.raise_if_nothing_inferred
-def infer_ifexp(self, context=None):
-    """Support IfExp inference
+@decorators.raise_if_nothing_queried
+def query_ifexp(self, context=None):
+    """Support IfExp Inference
 
-    If we can't infer the truthiness of the condition, we default
-    to inferring both branches. Otherwise, we infer either branch
+    If we can't query the truthiness of the condition, we default
+    to queriing both branches. Otherwise, we query either branch
     depending on the condition.
     """
     both_branches = False
     # We use two separate contexts for evaluating lhs and rhs because
     # evaluating lhs may leave some undesired entries in context.path
-    # which may not let us infer right value of rhs.
+    # which may not let us query right value of rhs.
 
     context = context or contextmod.InferenceContext()
     lhs_context = contextmod.copy_context(context)
     rhs_context = contextmod.copy_context(context)
     try:
-        test = next(self.test.infer(context=context.clone()))
+        test = next(self.test.query(context=context.clone()))
     except exceptions.InferenceError:
         both_branches = True
     else:
         if test is not util.Uninferable:
             if test.bool_value():
-                yield from self.body.infer(context=lhs_context)
+                yield from self.body.query(context=lhs_context)
             else:
-                yield from self.orelse.infer(context=rhs_context)
+                yield from self.orelse.query(context=rhs_context)
         else:
             both_branches = True
     if both_branches:
-        yield from self.body.infer(context=lhs_context)
-        yield from self.orelse.infer(context=rhs_context)
+        yield from self.body.query(context=lhs_context)
+        yield from self.orelse.query(context=rhs_context)
 
 
-nodes.IfExp._infer = infer_ifexp
+nodes.IfExp._query = query_ifexp
 
 
 # pylint: disable=dangerous-default-value
@@ -977,13 +941,13 @@ def _cached_generator(func, instance, args, kwargs, _cache={}):
         return original
 
 
-# When inferring a property, we instantiate a new `objects.Property` object,
+# When queriing a property, we instantiate a new `objects.Property` object,
 # which in turn, because it inherits from `FunctionDef`, sets itself in the locals
-# of the wrapping frame. This means that everytime we infer a property, the locals
+# of the wrapping frame. This means that everytime we query a property, the locals
 # are mutated with a new instance of the property. This is why we cache the result
-# of the function's inference.
+# of the function's Inference.
 @_cached_generator
-def infer_functiondef(self, context=None):
+def query_functiondef(self, context=None):
     if not self.decorators or not bases._is_property(self):
         yield self
         return dict(node=self, context=context)
@@ -1001,4 +965,4 @@ def infer_functiondef(self, context=None):
     return dict(node=self, context=context)
 
 
-nodes.FunctionDef._infer = infer_functiondef
+nodes.FunctionDef._query = query_functiondef

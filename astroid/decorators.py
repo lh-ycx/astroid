@@ -110,8 +110,47 @@ def path_wrapper(func):
     return wrapped
 
 
+def query_path_wrapper(func):
+    """return the given infer function wrapped to handle the path
+
+    Used to stop inference if the node has already been looked
+    at for a given `InferenceContext` to prevent infinite recursion
+    """
+
+    @functools.wraps(func)
+    def wrapped(node, context=None, _func=func, **kwargs):
+        """wrapper function handling context"""
+        if context is None:
+            context = contextmod.InferenceContext()
+        if context.push(node):
+            return None
+
+        try:
+            return _func(node, context, **kwargs)
+        except StopIteration as error:
+            if error.args:
+                return error.args[0]
+            return None
+
+    return wrapped
+
+
+
 @wrapt.decorator
 def yes_if_nothing_inferred(func, instance, args, kwargs):
+    generator = func(*args, **kwargs)
+
+    try:
+        yield next(generator)
+    except StopIteration:
+        # generator is empty
+        yield util.Uninferable
+        return
+
+    yield from generator
+
+@wrapt.decorator
+def yes_if_nothing_queried(func, instance, args, kwargs):
     generator = func(*args, **kwargs)
 
     try:
@@ -130,6 +169,24 @@ def raise_if_nothing_inferred(func, instance, args, kwargs):
 
     try:
         yield next(generator)
+    except StopIteration as error:
+        # generator is empty
+        if error.args:
+            # pylint: disable=not-a-mapping
+            raise exceptions.InferenceError(**error.args[0]) from error
+        raise exceptions.InferenceError(
+            "StopIteration raised without any error information."
+        ) from error
+
+    yield from generator
+
+
+@wrapt.decorator
+def raise_if_nothing_queried(func, instance, args, kwargs):
+    generator = func(*args, **kwargs)
+
+    try:
+        return next(generator)
     except StopIteration as error:
         # generator is empty
         if error.args:

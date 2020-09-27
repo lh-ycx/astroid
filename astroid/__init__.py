@@ -66,6 +66,7 @@ from astroid.nodes import *
 
 # trigger extra monkey-patching
 from astroid import inference
+from astroid import query
 
 # more stuff available
 from astroid import raw_building

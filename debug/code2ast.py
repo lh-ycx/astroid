@@ -2,8 +2,8 @@ import astroid
 from astroid import *
 
 code = '''
-extracted = spark.read.json(extracted_loc + '/*', mode='DROPMALFORMED')
+base64_string = ''.join(chr(x) for x in bytearray(row))
 '''
-ast = astroid.parse(code)
+ast = astroid.extract_node(code)
 print(ast.repr_tree())
 

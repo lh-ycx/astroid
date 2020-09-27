@@ -26,9 +26,10 @@ class InferenceContext:
         "boundnode",
         "inferred",
         "extra_context",
+        "queried",
     )
 
-    def __init__(self, path=None, inferred=None):
+    def __init__(self, path=None, inferred=None, queried=None):
         self.path = path or set()
         """
         :type: set(tuple(NodeNG, optional(str)))
@@ -68,6 +69,10 @@ class InferenceContext:
         Inferred node contexts to their mapped results
         Currently the key is ``(node, lookupname, callcontext, boundnode)``
         and the value is tuple of the inferred results
+        """
+        self.queried = queried or {}
+        """
+        similar to inferred, used in query
         """
         self.extra_context = {}
         """

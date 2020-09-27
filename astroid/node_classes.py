@@ -344,6 +344,31 @@ class NodeNG:
         self.parent = parent
         self.taint_tag = taint_tag
 
+    def query(self, context=None, **kwargs):
+        """
+        Similar to infer, but used to extract information flow
+        given a node, return the corresponding input node
+        """
+        if context is not None:
+            context = context.extra_context.get(self, context)
+
+        if not context:
+            related_inputs = self._query(context, **kwargs)
+            return related_inputs
+
+        key = (self, context.lookupname, context.callcontext, context.boundnode)
+        
+        if key in context.inferred:
+            return context.inferred[key]
+
+        results = self._query(context, **kwargs)
+
+        # Cache generated results for subsequent inferences of the
+        # same node using the same context
+        context.inferred[key] = tuple(results)
+        return results
+
+
     def infer(self, context=None, **kwargs):
         """Get a generator of the inferred values.
 
@@ -357,9 +382,6 @@ class NodeNG:
         :returns: The inferred values.
         :rtype: iterable
         """
-        from astroid.taint_node import TaintNode
-        if isinstance(self, TaintNode):
-            yield self
         if context is not None:
             context = context.extra_context.get(self, context)
         if self._explicit_inference is not None:
@@ -739,11 +761,22 @@ class NodeNG:
         # overridden for ImportFrom, Import, Global, TryExcept and Arguments
         pass
 
+    def _query_name(self, frame, name):
+        # overridden for ImportFrom, Import, Global, TryExcept and Arguments
+        return self._infer_name(frame, name)
+
     def _infer(self, context=None):
         """we don't know how to resolve a statement by default"""
         # this method is overridden by most concrete classes
         raise exceptions.InferenceError(
             "No inference function for {node!r}.", node=self, context=context
+        )
+
+    def _query(self, context=None):
+        """we don't know how to resolve a statement by default"""
+        # this method is overridden by most concrete classes
+        raise exceptions.InferenceError(
+            "No query function for {node!r}.", node=self, context=context
         )
 
     def inferred(self):
@@ -755,6 +788,16 @@ class NodeNG:
         :rtype: list
         """
         return list(self.infer())
+
+    def queried(self):
+        """Get a list of the inferred values.
+
+        .. seealso:: :ref:`inference`
+
+        :returns: The inferred values.
+        :rtype: list
+        """
+        return list(self.query())
 
     def instantiate_class(self):
         """Instantiate an instance of the defined class.
@@ -2676,6 +2719,10 @@ class Const(mixins.NoChildrenMixin, NodeNG, bases.Instance):
         :rtype: bool
         """
         return bool(self.value)
+
+    def query_attr(self, name, context=None):
+        # return Unqueryable to extract argument
+        return [self, util.Unqueryable]
 
 
 class Continue(mixins.NoChildrenMixin, Statement):
