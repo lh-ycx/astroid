@@ -69,6 +69,10 @@ def query_call(self: nodes.Call, context=None):
                 res.extend(arg.query(context))
             continue
 
+        if hasattr(callee, "query_end") and callee.query_end:
+            res.append(callee)
+            continue
+
         try:
             if hasattr(callee, "query_call_result"):
                 for result in callee.query_call_result(caller=self, context=callcontext):
@@ -78,8 +82,6 @@ def query_call(self: nodes.Call, context=None):
                     else:
                         res.append(result)
 
-            if isinstance(callee, nodes.Const):
-                res.append(callee)
         except exceptions.InferenceError:
             continue
     return res
@@ -103,6 +105,26 @@ def _populate_context_lookup(call, context):
     return context_lookup
 
 
+def _higher_function_scope(node):
+    """ Search for the first function which encloses the given
+    scope. This can be used for looking up in that function's
+    scope, in case looking up in a lower scope for a particular
+    name fails.
+
+    :param node: A scope node.
+    :returns:
+        ``None``, if no parent function scope was found,
+        otherwise an instance of :class:`astroid.scoped_nodes.Function`,
+        which encloses the given node.
+    """
+    current = node
+    while current.parent and not isinstance(current.parent, nodes.FunctionDef):
+        current = current.parent
+    if current and current.parent:
+        return current.parent
+    return None
+
+
 def query_name(self, context=None):
     """query a Name: use name lookup rules"""
     frame, stmts = self.lookup(self.name)
@@ -119,15 +141,17 @@ def query_name(self, context=None):
             )
     context = contextmod.copy_context(context)
     context.lookupname = self.name
-    return _query_stmts(stmts, context, frame)
+    res = []
+    for stmt in stmts:
+        res.extend(_query_stmt(stmt, context, frame))
+    return res
 
 
 nodes.Name._query = query_name
 nodes.AssignName.query_lhs = query_name
 
 
-def _query_stmts(stmts, context, frame=None):
-    """Return an iterator on statements queried by each statement in *stmts*."""
+def _query_stmt(stmt, context, frame=None):
     queried = False
     if context is not None:
         name = context.lookupname
@@ -137,25 +161,26 @@ def _query_stmts(stmts, context, frame=None):
         context = contextmod.InferenenceContext()
 
     res = []
-    for stmt in stmts:
-        if stmt is util.Uninferable:
-            continue
-        context.lookupname = stmt._query_name(frame, name)
-        try:
-            res.extend(stmt.query(context=context))
-            queried = True
-        except exceptions.NameInferenceError:
-            assert False
-            # continue
-        except exceptions.InferenceError:
-            assert False
-            # yield util.Uninferable
-            # queried = True
-            # continue
+
+    if stmt is util.Uninferable:
+        assert False
+    context.lookupname = stmt._query_name(frame, name)
+    try:
+        res.extend(stmt.query(context=context))
+        queried = True
+    except exceptions.NameInferenceError:
+        assert False
+        # continue
+    except exceptions.InferenceError:
+        assert False
+        # yield util.Uninferable
+        # queried = True
+        # continue
+
     if not queried:
         raise exceptions.InferenceError(
-            "query failed for all members of {stmts!r}.",
-            stmts=stmts,
+            "query failed for all members of {stmt!r}.",
+            stmts=stmt,
             frame=frame,
             context=context,
         )
@@ -194,7 +219,15 @@ def query_assign(self, context=None):
         return self.parent.query(context)
 
     stmts = self.query_assigned_stmts(context=context)
-    return _query_stmts(stmts, context)
+
+    # can't find further dependency, roll back
+    res = []
+    for stmt in stmts:
+        if stmt.query_end:
+            res.append(stmt)
+        else:
+            res.extend(_query_stmt(stmt, context))
+    return res
 
 nodes.AssignName._query = query_assign
 nodes.AssignAttr._query = query_assign
@@ -207,6 +240,10 @@ def query_attribute(self, context=None):
             assert False
 
         if owner is util.Unqueryable:
+            continue
+
+        if owner.query_end:
+            res.extend([owner, util.Unqueryable])
             continue
 
         if context and context.boundnode:

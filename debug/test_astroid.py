@@ -56,10 +56,12 @@ def main():
     code = open(input_file, 'r').read()
     tree = astroid.extract_node(code)
     # tree.args[0].taint_tag = True
-    print(tree.repr_tree())
+    # print(tree.repr_tree())
     # res = tree.inferred()
     res = tree.query()
-    print(res) # Instance of debug.tests.extra.taint_instance.TaintInstance
+    print(f"node ({tree.as_string()})'s dependency:")
+    for r in res:
+        print(r.repr_tree()) # Instance of debug.tests.extra.taint_instance.TaintInstance
 
     # try to get value from the instance
     # print(res.bool_value())

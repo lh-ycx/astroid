@@ -317,61 +317,6 @@ nodes.AssignName.query_assigned_stmts = assend_query_assigned_stmts
 nodes.AssignAttr.query_assigned_stmts = assend_query_assigned_stmts
 
 
-def _arguments_infer_argname(self, name, context):
-    # arguments information may be missing, in which case we can't do anything
-    # more
-    if not (self.arguments or self.vararg or self.kwarg):
-        yield util.Uninferable
-        return
-
-    functype = self.parent.type
-    # first argument of instance/class method
-    if (
-        self.arguments
-        and getattr(self.arguments[0], "name", None) == name
-        and functype != "staticmethod"
-    ):
-        cls = self.parent.parent.scope()
-        is_metaclass = isinstance(cls, nodes.ClassDef) and cls.type == "metaclass"
-        # If this is a metaclass, then the first argument will always
-        # be the class, not an instance.
-        if context.boundnode and isinstance(context.boundnode, bases.Instance):
-            cls = context.boundnode._proxied
-        if is_metaclass or functype == "classmethod":
-            yield cls
-            return
-        if functype == "method":
-            yield cls.instantiate_class()
-            return
-
-    if context and context.callcontext:
-        call_site = arguments.CallSite(context.callcontext, context.extra_context)
-        yield from call_site.infer_argument(self.parent, name, context)
-        return
-
-    if name == self.vararg:
-        vararg = nodes.const_factory(())
-        vararg.parent = self
-        if not self.arguments and self.parent.name == "__init__":
-            cls = self.parent.parent.scope()
-            vararg.elts = [cls.instantiate_class()]
-        yield vararg
-        return
-    if name == self.kwarg:
-        kwarg = nodes.const_factory({})
-        kwarg.parent = self
-        yield kwarg
-        return
-    # if there is a default value, yield it. And then yield Uninferable to reflect
-    # we can't guess given argument value
-    try:
-        context = contextmod.copy_context(context)
-        yield from self.default_value(name).infer(context)
-        yield util.Uninferable
-    except exceptions.NoDefault:
-        yield util.Uninferable
-
-
 def arguments_query_assigned_stmts(self, node=None, context=None, assign_path=None):
     if context.callcontext:
         # reset call context/name
@@ -380,22 +325,23 @@ def arguments_query_assigned_stmts(self, node=None, context=None, assign_path=No
         context.callcontext = None
         args = arguments.CallSite(callcontext, context=context)
         return args.query_argument(self.parent, node.name, context)
-    return _arguments_infer_argname(self, node.name, context)
+    # no call context means that we get to the end point
+    # print("end point here!!")
+    node.query_end = True
+    return [node]
 
 
 nodes.Arguments.query_assigned_stmts = arguments_query_assigned_stmts
 
 
-@decorators.raise_if_nothing_inferred
 def assign_query_assigned_stmts(self, node=None, context=None, assign_path=None):
     if not assign_path:
-        yield self.value
-        return None
-    yield from _resolve_assignment_parts(
-        self.value.infer(context), assign_path, context
-    )
+        return [self.value]
+    # yield from _resolve_assignment_parts(
+    #     self.value.infer(context), assign_path, context
+    # )
 
-    return dict(node=self, unknown=node, assign_path=assign_path, context=context)
+    # return dict(node=self, unknown=node, assign_path=assign_path, context=context)
 
 
 def assign_annquery_assigned_stmts(self, node=None, context=None, assign_path=None):

@@ -343,6 +343,7 @@ class NodeNG:
         self.col_offset = col_offset
         self.parent = parent
         self.taint_tag = taint_tag
+        self.query_end = False  # set True when triggering end point.
 
     def query(self, context=None, **kwargs):
         """
@@ -2634,6 +2635,7 @@ class Const(mixins.NoChildrenMixin, NodeNG, bases.Instance):
         """
 
         super().__init__(lineno, col_offset, parent)
+        self.query_end = True
 
     def __getattr__(self, name):
         # This is needed because of Proxy's __getattr__ method.
