@@ -10,6 +10,6 @@ def decode_base64(row):
     return_val = base64.b64decode(base64_string).decode('utf-8')
     return return_val
 
-decode_udf = udf(__(lambda z: decode_base64(z)), StringType())
+decode_udf = udf(lambda z: __(decode_base64(z)), StringType())
 
 docs_text = docs.withColumn("DecodedText", decode_udf(docs['FileContent']))

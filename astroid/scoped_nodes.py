@@ -1724,64 +1724,31 @@ class FunctionDef(mixins.MultiLineBlockMixin, node_classes.Statement, Lambda):
                     yield util.Uninferable
 
     def query_call_result(self, caller=None, context=None):
-        """Infer what the function returns when called.
+        """Query what the function returns when called.
 
         :returns: What the function returns.
         :rtype: iterable(NodeNG or Uninferable) or None
         """
-        if self.is_generator():
-            if isinstance(self, AsyncFunctionDef):
-                generator_cls = bases.AsyncGenerator
-            else:
-                generator_cls = bases.Generator
-            result = generator_cls(self)
-            yield result
-            return
-        # This is really a gigantic hack to work around metaclass generators
-        # that return transient class-generating functions. Pylint's AST structure
-        # cannot handle a base class object that is only used for calling __new__,
-        # but does not contribute to the inheritance structure itself. We inject
-        # a fake class into the hierarchy here for several well-known metaclass
-        # generators, and filter it out later.
-        if (
-            self.name == "with_metaclass"
-            and len(self.args.args) == 1
-            and self.args.vararg is not None
-        ):
-            metaclass = next(caller.args[0].infer(context))
-            if isinstance(metaclass, ClassDef):
-                class_bases = [next(arg.infer(context)) for arg in caller.args[1:]]
-                new_class = ClassDef(name="temporary_class")
-                new_class.hide = True
-                new_class.parent = self
-                new_class.postinit(
-                    bases=[base for base in class_bases if base != util.Uninferable],
-                    body=[],
-                    decorators=[],
-                    metaclass=metaclass,
-                )
-                yield new_class
-                return
+
         returns = self._get_return_nodes_skip_functions()
 
         first_return = next(returns, None)
         if not first_return:
             if self.body and isinstance(self.body[-1], node_classes.Assert):
-                yield node_classes.Const(None)
-                return
+                return [node_classes.Const(None)]
 
-            raise exceptions.InferenceError(
-                "The function does not have any return statements"
-            )
+            return [util.Unqueryable]
 
+        res = []
         for returnnode in itertools.chain((first_return,), returns):
             if returnnode.value is None:
-                yield node_classes.Const(None)
+                res.append(node_classes.Const(None))
             else:
                 try:
-                    yield from returnnode.value.query(context)
+                    res.extend(returnnode.value.query(context))
                 except exceptions.InferenceError:
-                    yield util.Uninferable
+                    return [util.Unqueryable]
+        return res
 
     def bool_value(self, context=None):
         """Determine the boolean value of this node.
@@ -2246,6 +2213,14 @@ class ClassDef(mixins.FilterStmtsMixin, LocalsDictNodeNG, node_classes.Statement
             yield from dunder_call.infer_call_result(caller, context)
         else:
             yield self.instantiate_class()
+
+
+    def query_call_result(self, caller, context=None):
+        """query what a class is dependent on when called"""
+        # since astroid losses field sensitive in class, here we simply return
+        # unqueryable, which means that it depends on its input.
+        return [util.Unqueryable]
+
 
     def scope_lookup(self, node, name, offset=0):
         """Lookup where the given name is assigned.

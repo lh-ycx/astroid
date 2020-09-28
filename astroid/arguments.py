@@ -298,3 +298,157 @@ class CallSite:
             arg=name,
             context=context,
         )
+
+    def query_argument(self, funcnode, name, context):
+        """infer a function argument value according to the call context
+
+        Arguments:
+            funcnode: The function being called.
+            name: The name of the argument whose value is being inferred.
+            context: Inference context object
+        """
+        if name in self.duplicated_keywords:
+            raise exceptions.InferenceError(
+                "The arguments passed to {func!r} " " have duplicate keywords.",
+                call_site=self,
+                func=funcnode,
+                arg=name,
+                context=context,
+            )
+
+        # Look into the keywords first, maybe it's already there.
+        try:
+            return self.keyword_arguments[name].query(context)
+        except KeyError:
+            pass
+
+        # Too many arguments given and no variable arguments.
+        if len(self.positional_arguments) > len(funcnode.args.args):
+            if not funcnode.args.vararg:
+                raise exceptions.InferenceError(
+                    "Too many positional arguments "
+                    "passed to {func!r} that does "
+                    "not have *args.",
+                    call_site=self,
+                    func=funcnode,
+                    arg=name,
+                    context=context,
+                )
+
+        positional = self.positional_arguments[: len(funcnode.args.args)]
+        vararg = self.positional_arguments[len(funcnode.args.args) :]
+        argindex = funcnode.args.find_argname(name)[0]
+        kwonlyargs = {arg.name for arg in funcnode.args.kwonlyargs}
+        kwargs = {
+            key: value
+            for key, value in self.keyword_arguments.items()
+            if key not in kwonlyargs
+        }
+        # If there are too few positionals compared to
+        # what the function expects to receive, check to see
+        # if the missing positional arguments were passed
+        # as keyword arguments and if so, place them into the
+        # positional args list.
+        if len(positional) < len(funcnode.args.args):
+            for func_arg in funcnode.args.args:
+                if func_arg.name in kwargs:
+                    arg = kwargs.pop(func_arg.name)
+                    positional.append(arg)
+
+        if argindex is not None:
+            # 2. first argument of instance/class method
+            if argindex == 0 and funcnode.type in ("method", "classmethod"):
+                if context.boundnode is not None:
+                    boundnode = context.boundnode
+                else:
+                    # XXX can do better ?
+                    boundnode = funcnode.parent.frame()
+
+                if isinstance(boundnode, nodes.ClassDef):
+                    # Verify that we're accessing a method
+                    # of the metaclass through a class, as in
+                    # `cls.metaclass_method`. In this case, the
+                    # first argument is always the class.
+                    method_scope = funcnode.parent.scope()
+                    if method_scope is boundnode.metaclass():
+                        return iter((boundnode,))
+
+                if funcnode.type == "method":
+                    if not isinstance(boundnode, bases.Instance):
+                        boundnode = boundnode.instantiate_class()
+                    return iter((boundnode,))
+                if funcnode.type == "classmethod":
+                    return iter((boundnode,))
+            # if we have a method, extract one position
+            # from the index, so we'll take in account
+            # the extra parameter represented by `self` or `cls`
+            if funcnode.type in ("method", "classmethod"):
+                argindex -= 1
+            # 2. search arg index
+            try:
+                return self.positional_arguments[argindex].query(context)
+            except IndexError:
+                pass
+            except Exception:
+                import traceback
+                traceback.print_exc()
+
+        if funcnode.args.kwarg == name:
+            # It wants all the keywords that were passed into
+            # the call site.
+            if self.has_invalid_keywords():
+                raise exceptions.InferenceError(
+                    "Inference failed to find values for all keyword arguments "
+                    "to {func!r}: {unpacked_kwargs!r} doesn't correspond to "
+                    "{keyword_arguments!r}.",
+                    keyword_arguments=self.keyword_arguments,
+                    unpacked_kwargs=self._unpacked_kwargs,
+                    call_site=self,
+                    func=funcnode,
+                    arg=name,
+                    context=context,
+                )
+            kwarg = nodes.Dict(
+                lineno=funcnode.args.lineno,
+                col_offset=funcnode.args.col_offset,
+                parent=funcnode.args,
+            )
+            kwarg.postinit(
+                [(nodes.const_factory(key), value) for key, value in kwargs.items()]
+            )
+            return iter((kwarg,))
+        if funcnode.args.vararg == name:
+            # It wants all the args that were passed into
+            # the call site.
+            if self.has_invalid_arguments():
+                raise exceptions.InferenceError(
+                    "Inference failed to find values for all positional "
+                    "arguments to {func!r}: {unpacked_args!r} doesn't "
+                    "correspond to {positional_arguments!r}.",
+                    positional_arguments=self.positional_arguments,
+                    unpacked_args=self._unpacked_args,
+                    call_site=self,
+                    func=funcnode,
+                    arg=name,
+                    context=context,
+                )
+            args = nodes.Tuple(
+                lineno=funcnode.args.lineno,
+                col_offset=funcnode.args.col_offset,
+                parent=funcnode.args,
+            )
+            args.postinit(vararg)
+            return iter((args,))
+
+        # Check if it's a default parameter.
+        try:
+            return funcnode.args.default_value(name).infer(context)
+        except exceptions.NoDefault:
+            pass
+        raise exceptions.InferenceError(
+            "No value found for argument {name} to " "{func!r}",
+            call_site=self,
+            func=funcnode,
+            arg=name,
+            context=context,
+        )

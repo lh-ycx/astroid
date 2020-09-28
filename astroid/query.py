@@ -16,7 +16,7 @@ from astroid import helpers
 from astroid import manager
 from astroid import nodes
 from astroid.interpreter import dunder_lookup
-from astroid import protocols
+from astroid import query_protocols
 from astroid import util
 
 
@@ -36,13 +36,13 @@ def query_end(self, context=None):
     """
     return [self]
 
-def query_lambda(self, context=None):
-    return self.body.query(context)
+# def query_lambda(self, context=None):
+#     return self.body.query(context)
 
 
 nodes.Module._query = query_end
 nodes.ClassDef._query = query_end
-nodes.Lambda._query = query_lambda
+nodes.Lambda._query = query_end
 nodes.Const._query = query_end
 nodes.Slice._query = query_end
 
@@ -71,7 +71,13 @@ def query_call(self: nodes.Call, context=None):
 
         try:
             if hasattr(callee, "query_call_result"):
-                res.extend(callee.query_call_result(caller=self, context=callcontext))
+                for result in callee.query_call_result(caller=self, context=callcontext):
+                    if result is util.Unqueryable:
+                        for arg in self.args:
+                            res.extend(arg.query(context))
+                    else:
+                        res.append(result)
+
             if isinstance(callee, nodes.Const):
                 res.append(callee)
         except exceptions.InferenceError:
@@ -187,7 +193,7 @@ def query_assign(self, context=None):
     if isinstance(self.parent, nodes.AugAssign):
         return self.parent.query(context)
 
-    stmts = list(self.assigned_stmts(context=context))
+    stmts = self.query_assigned_stmts(context=context)
     return _query_stmts(stmts, context)
 
 nodes.AssignName._query = query_assign
@@ -251,3 +257,11 @@ def query_import(self, context=None, asname=True):
 
 
 nodes.Import._query = query_import
+
+# e.g. [char(x) for x in row] => query(row)
+def query_generator_expr(self: nodes.GeneratorExp, context=None):
+    elements = self.elt.query(context)
+    return elements
+    # for ele in elements:
+
+nodes.GeneratorExp._query = query_generator_expr

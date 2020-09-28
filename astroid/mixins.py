@@ -136,6 +136,17 @@ class MultiLineBlockMixin:
                     continue
                 yield from child_node._get_return_nodes_skip_functions()
 
+    def _query_return_nodes_skip_functions(self):
+        res = []
+        for block in self._multi_line_blocks:
+            for child_node in block:
+                if child_node.is_function:
+                    continue
+                res.extend(child_node._query_return_nodes_skip_functions())
+        return res
+
+
+
     def _get_yield_nodes_skip_lambdas(self):
         for block in self._multi_line_blocks:
             for child_node in block:
