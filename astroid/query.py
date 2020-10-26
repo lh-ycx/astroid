@@ -229,8 +229,10 @@ def query_assign(self, context=None):
             res.extend(_query_stmt(stmt, context))
     return res
 
+
 nodes.AssignName._query = query_assign
-nodes.AssignAttr._query = query_assign
+# nodes.AssignAttr._query = query_assign
+
 
 def query_attribute(self, context=None):
     """query an Attribute node by using getattr on the associated object"""
@@ -302,3 +304,77 @@ def query_generator_expr(self: nodes.GeneratorExp, context=None):
     # for ele in elements:
 
 nodes.GeneratorExp._query = query_generator_expr
+
+
+def _filter_operation_errors(self, query_callable, context, error):
+    res = []
+    for result in query_callable(self, context):
+        if isinstance(result, error):
+            # For the sake of .query(), we don't care about operation
+            # errors, which is the job of pylint. So return something
+            # which shows that we can't query the result.
+            # yield util.Unqueryable
+            continue
+        else:
+            res.append(result)
+    return res
+
+
+def _query_augassign(self, context=None):
+    """query logic for augmented binary operations."""
+    if context is None:
+        context = contextmod.InferenceContext()
+
+    rhs_context = context.clone()
+
+    lhs_res = self.target.query_lhs(context=context)
+    rhs_res = self.value.query(context=rhs_context)
+    res = []
+    for lhs, rhs in itertools.product(lhs_res, rhs_res):
+        if any(value is util.Unqueryable for value in (rhs, lhs)):
+            # Don't know how to process this.
+            continue
+            # return util.Unqueryable
+
+        try:
+            result = _query_binary_operation(
+                left=lhs,
+                right=rhs,
+                binary_opnode=self,
+                context=context,
+                # flow_factory=_get_aug_flow,
+            )
+            res.extend(result)
+        except exceptions._NonDeducibleTypeHierarchy:
+            continue
+    return res
+
+
+def query_augassign(self, context=None):
+    return _filter_operation_errors(
+        self, _query_augassign, context, util.BadBinaryOperationMessage
+    )
+
+
+nodes.AugAssign._query_augassign = _query_augassign
+nodes.AugAssign._query = query_augassign
+
+
+def _query_binary_operation(left, right, binary_opnode, context):
+    """
+    This is used by both normal binary operations and augmented binary
+    operations, unlike inference, we don't care the result of binary_operation.
+    """
+    res = []
+    try:
+        left_results = left.query(context)
+        right_results = right.query(context)
+        res.extend(left_results)
+        res.extend(right_results)
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        assert False
+    return res
+
+

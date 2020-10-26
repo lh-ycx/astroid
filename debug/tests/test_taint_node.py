@@ -1,6 +1,5 @@
 from pyspark.sql.functions import udf
 from pyspark.sql.types import *
-from debug.tests.extra.taint_instance import TaintInstance
 
 import base64
 

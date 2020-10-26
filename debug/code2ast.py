@@ -2,7 +2,7 @@ import astroid
 from astroid import *
 
 code = '''
-base64_string = ''.join(chr(x) for x in bytearray(row))
+udf((lambda x: FeatureProcessor.ExtractEmailAddressesFromJson(x, useAdlSchema, isSingleAddress, returnNames)), StringType())
 '''
 ast = astroid.extract_node(code)
 print(ast.repr_tree())

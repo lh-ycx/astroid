@@ -3,6 +3,7 @@
 .hgtags/
 *.py[cod]
 log
+venv/
 build
 dist/
 astroid.egg-info/
